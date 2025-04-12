@@ -8,13 +8,14 @@ async fn main() -> anyhow::Result<()> {
         .expect("port not specified")
         .parse::<u16>()
         .expect("port not a number");
+    let remote_addr = args.get(2).expect("addr not specified");
     let remote_port = args
-        .get(2)
+        .get(3)
         .expect("port not specified")
         .parse::<u16>()
         .expect("port not a number");
     //local_listener(local_port).await?;
-    puncher(local_port, "127.0.0.1", remote_port).await?;
+    puncher(local_port, &remote_addr, remote_port).await?;
     Ok(())
 }
 
