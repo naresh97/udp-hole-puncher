@@ -1,40 +1,38 @@
+mod cli;
+
+use clap::Parser;
 use tokio::{
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream, UdpSocket},
     sync::mpsc::{Receiver, Sender},
 };
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = std::env::args().collect::<Vec<_>>();
-    let local_port = args
-        .get(1)
-        .expect("port not specified")
-        .parse::<u16>()
-        .expect("port not a number");
-    let remote_addr = args.get(2).expect("addr not specified");
-    let remote_port = args
-        .get(3)
-        .expect("port not specified")
-        .parse::<u16>()
-        .expect("port not a number");
-    let peer_port = args
-        .get(4)
-        .expect("port not specified")
-        .parse::<u16>()
-        .expect("port not a number");
+    let cli = cli::Cli::parse();
+    println!("cli: {:?}", cli);
 
-    let (tx_to_peer, mut rx_from_peer) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
-    let (tx_to_local, mut rx_from_local) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+    let (tx_to_peer, rx_from_peer) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
+    let (tx_to_local, rx_from_local) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
 
-    local_listener(peer_port, tx_to_peer, rx_from_local).await?;
+    match cli.command {
+        cli::Command::Listen { listen_on_port } => {
+            local_listener(listen_on_port, tx_to_peer, rx_from_local).await?;
+        }
+        cli::Command::Forward { forward_to_port } => {
+            forwarder(forward_to_port, tx_to_peer, rx_from_local).await?;
+        }
+    }
+
     puncher(
-        local_port,
-        &remote_addr,
-        remote_port,
+        cli.local_tunnel_port,
+        &cli.remote_addr,
+        cli.remote_tunnel_port,
         tx_to_local,
         rx_from_peer,
     )
     .await?;
+
     Ok(())
 }
 
@@ -115,55 +113,67 @@ async fn puncher(
 async fn local_listener(
     port: u16,
     tx: Sender<Vec<u8>>,
-    rx: Receiver<Vec<u8>>,
+    mut rx: Receiver<Vec<u8>>,
 ) -> anyhow::Result<()> {
     println!("Listening on port {}", port);
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
-    let (socket, _) = listener.accept().await?;
-    handle_client(socket, tx, rx).await
-}
-
-async fn handle_client(
-    socket: TcpStream,
-    tx: Sender<Vec<u8>>,
-    mut rx: Receiver<Vec<u8>>,
-) -> anyhow::Result<()> {
-    println!("Accepted connection from {}", socket.peer_addr().unwrap());
-    loop {
-        socket.readable().await?;
+    'connection_loop: loop {
+        let (mut socket, _) = listener.accept().await?;
+        println!("Accepted connection from {}", socket.peer_addr()?);
+        // Accept only one connection at a time
         let mut buf = [0; 1024];
-        match socket.try_read(&mut buf) {
-            Ok(n) => {
-                if n == 0 {
-                    println!("Client disconnected");
-                    break;
+        loop {
+            socket.readable().await?;
+            match socket.try_read(&mut buf) {
+                Ok(0) => {
+                    println!("Connection closed");
+                    break 'connection_loop;
                 }
-                tx.send(buf[..n].to_vec()).await?;
-                let response = rx
-                    .recv()
-                    .await
-                    .ok_or(anyhow::anyhow!("Failed to receive response"))?;
-                loop {
-                    match socket.try_write(&response) {
-                        Ok(_) => break,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                continue;
-                            } else {
-                                break;
-                            }
-                        }
-                    }
+                Ok(n) => {
+                    tx.send(buf[..n].to_vec()).await?;
+                    let response = rx
+                        .recv()
+                        .await
+                        .ok_or(anyhow::anyhow!("The channel has been closed"))?;
+                    let _ = socket.write(&response).await;
                 }
-            }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    continue;
-                } else {
-                    break;
+                Err(e) => {
+                    println!("Error reading from socket: {}", e);
+                    break 'connection_loop;
                 }
             }
         }
     }
     Ok(())
+}
+
+async fn forwarder(
+    port: u16,
+    tx: Sender<Vec<u8>>,
+    mut rx: Receiver<Vec<u8>>,
+) -> anyhow::Result<()> {
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await?;
+    loop {
+        let message = rx
+            .recv()
+            .await
+            .ok_or(anyhow::anyhow!("The channel has been closed"))?;
+        let _ = socket.write(&message).await;
+        let mut buf = [0; 1024];
+        socket.readable().await?;
+        match socket.try_read(&mut buf) {
+            Ok(0) => {
+                println!("Connection closed");
+                break;
+            }
+            Ok(n) => {
+                tx.send(buf[..n].to_vec()).await?;
+            }
+            Err(e) => {
+                println!("Error reading from socket: {}", e);
+                break;
+            }
+        }
+    }
+    todo!()
 }
