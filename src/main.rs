@@ -134,11 +134,13 @@ async fn local_listener(
                     break 'connection_loop;
                 }
                 Ok(n) => {
+                    println!("Sending {} bytes to peer", n);
                     tx.send(buf[..n].to_vec()).await?;
                     let response = rx
                         .recv()
                         .await
                         .ok_or(anyhow::anyhow!("The channel has been closed"))?;
+                    println!("Received {} bytes from peer", response.len());
                     let _ = socket.write(&response).await;
                 }
                 Err(e) => {
@@ -164,6 +166,7 @@ async fn forwarder(
             .recv()
             .await
             .ok_or(anyhow::anyhow!("The channel has been closed"))?;
+        println!("Received {} bytes from peer", message.len());
         let _ = socket.write(&message).await;
         let mut buf = [0; 1024];
         socket.readable().await?;
@@ -173,6 +176,7 @@ async fn forwarder(
                 break;
             }
             Ok(n) => {
+                println!("Sending {} bytes to peer", n);
                 tx.send(buf[..n].to_vec()).await?;
             }
             Err(e) => {
