@@ -57,7 +57,7 @@ async fn puncher(
         }
         tokio::select! {
             _ =  socket.readable() => {
-                let mut buf = [0; 1024];
+                let mut buf = [0; 10_000];
                 let _ = socket.try_recv(&mut buf);
                 let msg = String::from_utf8_lossy(&buf);
                 if msg.contains("PUNCH") && !msg.contains("ACK_PUNCH") {
@@ -77,7 +77,7 @@ async fn puncher(
     loop {
         tokio::select! {
             _ = socket.readable()=>{
-                let mut buf = [0; 1024];
+                let mut buf = [0; 10_000];
                 match socket.try_recv(&mut buf) {
                     Ok(0) => {
                         println!("Connection closed");
@@ -115,7 +115,7 @@ async fn local_listener(
         let (mut socket, _) = listener.accept().await?;
         println!("Accepted connection from {}", socket.peer_addr()?);
         // Accept only one connection at a time
-        let mut buf = [0; 1024];
+        let mut buf = [0; 10_000];
         loop {
             socket.readable().await?;
             match socket.try_read(&mut buf) {
@@ -158,7 +158,7 @@ async fn forwarder(
             .ok_or(anyhow::anyhow!("The channel has been closed"))?;
         println!("Received {} bytes from peer", message.len());
         let _ = socket.write(&message).await;
-        let mut buf = [0; 1024];
+        let mut buf = [0; 10_000];
         socket.readable().await?;
         match socket.try_read(&mut buf) {
             Ok(0) => {
