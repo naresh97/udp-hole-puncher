@@ -84,6 +84,10 @@ async fn puncher(
                         break;
                     }
                     Ok(n) => {
+                        let msg = String::from_utf8_lossy(&buf);
+                        if msg == "PUNCH" || msg == "ACK_PUNCH" {
+                            continue;
+                        }
                         let _ = tx.try_send(buf[..n].to_vec());
                     }
                     Err(e) => {
