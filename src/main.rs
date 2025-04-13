@@ -1,5 +1,6 @@
 mod cli;
 
+use anyhow::Context;
 use clap::Parser;
 use tokio::{
     io::AsyncWriteExt,
@@ -15,14 +16,17 @@ async fn main() -> anyhow::Result<()> {
     let (tx_to_peer, rx_from_peer) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
     let (tx_to_local, rx_from_local) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
 
-    match cli.command {
-        cli::Command::Listen { listen_on_port } => {
-            local_listener(listen_on_port, tx_to_peer, rx_from_local).await?;
+    tokio::spawn(async move {
+        match cli.command {
+            cli::Command::Listen { listen_on_port } => {
+                local_listener(listen_on_port, tx_to_peer, rx_from_local).await?;
+            }
+            cli::Command::Forward { forward_to_port } => {
+                forwarder(forward_to_port, tx_to_peer, rx_from_local).await?;
+            }
         }
-        cli::Command::Forward { forward_to_port } => {
-            forwarder(forward_to_port, tx_to_peer, rx_from_local).await?;
-        }
-    }
+        Ok::<(), anyhow::Error>(())
+    });
 
     puncher(
         cli.local_tunnel_port,
@@ -152,7 +156,9 @@ async fn forwarder(
     tx: Sender<Vec<u8>>,
     mut rx: Receiver<Vec<u8>>,
 ) -> anyhow::Result<()> {
-    let mut socket = TcpStream::connect(("127.0.0.1", port)).await?;
+    let mut socket = TcpStream::connect(("127.0.0.1", port))
+        .await
+        .context("Could not connect to 127.0.0.1 on specified port")?;
     loop {
         let message = rx
             .recv()
