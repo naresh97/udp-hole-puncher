@@ -116,7 +116,7 @@ async fn local_listener(
         println!("Accepted connection from {}", socket.peer_addr()?);
         // Accept only one connection at a time
         let mut buf = [0; 10_000];
-        loop {
+        'read_loop: loop {
             socket.readable().await?;
             match socket.try_read(&mut buf) {
                 Ok(0) => {
@@ -134,6 +134,9 @@ async fn local_listener(
                     let _ = socket.write(&response).await;
                 }
                 Err(e) => {
+                    if e.kind() == std::io::ErrorKind::WouldBlock {
+                        continue 'read_loop;
+                    }
                     println!("Error reading from socket: {}", e);
                     break 'connection_loop;
                 }
@@ -170,6 +173,9 @@ async fn forwarder(
                 tx.send(buf[..n].to_vec()).await?;
             }
             Err(e) => {
+                if e.kind() == std::io::ErrorKind::WouldBlock {
+                    continue;
+                }
                 println!("Error reading from socket: {}", e);
                 break;
             }
