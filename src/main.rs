@@ -129,6 +129,10 @@ async fn local_listener(
                 }
                 Ok(n) => {
                     println!("Sending {} bytes to peer", n);
+                    let msg = String::from_utf8_lossy(&buf);
+                    if msg == "PUNCH" || msg == "ACK_PUNCH" {
+                        continue;
+                    }
                     tx.send(buf[..n].to_vec()).await?;
                     let response = rx
                         .recv()
