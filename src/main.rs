@@ -87,6 +87,9 @@ async fn puncher(
                         let _ = tx.try_send(buf[..n].to_vec());
                     }
                     Err(e) => {
+                        if e.kind() == std::io::ErrorKind::WouldBlock {
+                            continue;
+                        }
                         println!("Error reading from socket: {}", e);
                         break;
                     }
