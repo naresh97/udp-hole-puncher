@@ -75,38 +75,25 @@ async fn puncher(
     }
     println!("Punched through to {}:{}", remote_addr, remote_port);
     loop {
-        socket.readable().await?;
-        let mut buf = [0; 1024];
-        match socket.try_recv(&mut buf) {
-            Ok(n) => {
-                if n == 0 {
-                    println!("Peer disconnected");
-                    break;
-                }
-                tx.send(buf[..n].to_vec()).await?;
-                let response = rx
-                    .recv()
-                    .await
-                    .ok_or(anyhow::anyhow!("Failed to receive response"))?;
-                loop {
-                    match socket.try_send(&response) {
-                        Ok(_) => break,
-                        Err(e) => {
-                            if e.kind() == std::io::ErrorKind::WouldBlock {
-                                continue;
-                            } else {
-                                break;
-                            }
-                        }
+        tokio::select! {
+            _ = socket.readable()=>{
+                let mut buf = [0; 1024];
+                match socket.try_recv(&mut buf) {
+                    Ok(0) => {
+                        println!("Connection closed");
+                        break;
+                    }
+                    Ok(n) => {
+                        let _ = tx.try_send(buf[..n].to_vec());
+                    }
+                    Err(e) => {
+                        println!("Error reading from socket: {}", e);
+                        break;
                     }
                 }
             }
-            Err(e) => {
-                if e.kind() == std::io::ErrorKind::WouldBlock {
-                    continue;
-                } else {
-                    break;
-                }
+            Some(message) = rx.recv() => {
+                let _ = socket.try_send(&message);
             }
         }
     }
